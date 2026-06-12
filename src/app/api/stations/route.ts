@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 const FUEL_API = 'https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/records'
-const OVERPASS_API = 'https://overpass-api.de/api/interpreter'
 
 const FUEL_COLS = [
   { col: 'gazole_prix', maj: 'gazole_maj', name: 'Gazole' },
@@ -13,46 +12,10 @@ const FUEL_COLS = [
   { col: 'gplc_prix',   maj: 'gplc_maj',   name: 'GPLc'   },
 ]
 
-interface OsmStation { lat: number; lon: number; brand: string; name: string }
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLon = (lon2 - lon1) * Math.PI / 180
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371000, dLat = (lat2-lat1)*Math.PI/180, dLon = (lon2-lon1)*Math.PI/180
   const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-}
-
-async function fetchOsmBrands(lat: number, lon: number, radiusM: number): Promise<OsmStation[]> {
-  // Slightly larger radius to cover all stations
-  const r = Math.min(radiusM + 500, 25000)
-  const query = `[out:json][timeout:10];
-(
-  node["amenity"="fuel"](around:${r},${lat},${lon});
-  way["amenity"="fuel"](around:${r},${lat},${lon});
-);
-out center tags;`
-
-  const res = await fetch(OVERPASS_API, {
-    method: 'POST',
-    body: `data=${encodeURIComponent(query)}`,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    signal: AbortSignal.timeout(8000),
-    cache: 'no-store',
-  })
-  if (!res.ok) return []
-  const data = await res.json()
-
-  return (data.elements ?? []).map((el: Record<string, unknown>) => {
-    const tags = (el.tags ?? {}) as Record<string, string>
-    const lat = typeof el.lat === 'number' ? el.lat : (el.center as {lat:number})?.lat ?? 0
-    const lon = typeof el.lon === 'number' ? el.lon : (el.center as {lon:number})?.lon ?? 0
-    return {
-      lat, lon,
-      brand: tags.brand ?? tags.operator ?? '',
-      name: tags.name ?? tags['brand:fr'] ?? '',
-    }
-  }).filter((s: OsmStation) => s.lat !== 0)
 }
 
 function normalizeBrand(raw: string): string {
@@ -61,20 +24,49 @@ function normalizeBrand(raw: string): string {
   if (/intermarché|intermarche/.test(s)) return 'Intermarché'
   if (/carrefour/.test(s)) return 'Carrefour'
   if (/e\.?\s*leclerc|leclerc/.test(s)) return 'E.Leclerc'
-  if (/totalenergies|total/.test(s)) return 'TotalEnergies'
-  if (/bp\b/.test(s)) return 'BP'
+  if (/totalenergies|total access|total\b/.test(s)) return 'TotalEnergies'
+  if (/\bbp\b/.test(s)) return 'BP'
   if (/shell/.test(s)) return 'Shell'
   if (/esso/.test(s)) return 'Esso'
   if (/auchan/.test(s)) return 'Auchan'
   if (/super\s*u\b/.test(s)) return 'Super U'
-  if (/casino/.test(s)) return 'Casino'
-  if (/netto/.test(s)) return 'Netto'
-  if (/avia/.test(s)) return 'Avia'
+  if (/\bcasino\b/.test(s)) return 'Casino'
+  if (/\bnetto\b/.test(s)) return 'Netto'
+  if (/\bavia\b/.test(s)) return 'Avia'
   if (/dyneff/.test(s)) return 'Dyneff'
-  if (/q8/.test(s)) return 'Q8'
-  if (/pétrole|petrol|pem\b/.test(s)) return 'PEM'
-  // Return title-cased version of whatever is there
-  return raw.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+  if (/\bq8\b/.test(s)) return 'Q8'
+  if (raw.length > 2 && raw.length < 40 && !/^\d|^rue|^avenue|^boulevard/i.test(raw)) {
+    return raw.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+  }
+  return ''
+}
+
+interface OsmElement { lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }
+
+async function fetchOverpassBrands(lat: number, lon: number, radiusM: number): Promise<Array<{ lat: number; lon: number; brand: string }>> {
+  const r = Math.min(radiusM + 1000, 25000)
+  // Use application/x-www-form-urlencoded WITHOUT Accept header — Overpass returns JSON when [out:json] is in query
+  const query = `[out:json][timeout:10];(node["amenity"="fuel"](around:${r},${lat},${lon});way["amenity"="fuel"](around:${r},${lat},${lon}););out center tags;`
+  
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: new URLSearchParams({ data: query }),
+    // No Accept header — let Overpass decide based on [out:json]
+    signal: AbortSignal.timeout(10000),
+    cache: 'no-store',
+  })
+  
+  if (!res.ok) {
+    console.error('Overpass error:', res.status, await res.text().catch(() => ''))
+    return []
+  }
+  
+  const data = await res.json()
+  return ((data.elements ?? []) as OsmElement[]).map(el => ({
+    lat: el.lat ?? el.center?.lat ?? 0,
+    lon: el.lon ?? el.center?.lon ?? 0,
+    brand: normalizeBrand(el.tags?.brand ?? el.tags?.operator ?? el.tags?.name ?? ''),
+  })).filter(s => s.lat !== 0)
 }
 
 export async function GET(req: NextRequest) {
@@ -86,7 +78,6 @@ export async function GET(req: NextRequest) {
   if (isNaN(lat) || isNaN(lon)) return NextResponse.json({ error: 'Missing lat/lon' }, { status: 400 })
 
   try {
-    // Fetch gov prices + OSM brands in parallel
     const distanceClause = `distance(geom, geom'POINT(${lon} ${lat})', ${radius}m)`
     const fuelColEntry = fuel ? FUEL_COLS.find(f => f.name === fuel) : null
     const fuelClause = fuelColEntry ? ` AND ${fuelColEntry.col} IS NOT NULL` : ''
@@ -98,48 +89,38 @@ export async function GET(req: NextRequest) {
 
     const [govRes, osmStations] = await Promise.all([
       fetch(govUrl.toString(), { cache: 'no-store' }),
-      fetchOsmBrands(lat, lon, radius).catch(() => [] as OsmStation[]),
+      fetchOverpassBrands(lat, lon, radius).catch(() => []),
     ])
 
     if (!govRes.ok) return NextResponse.json({ error: `Upstream ${govRes.status}` }, { status: 502 })
     const govData = await govRes.json()
 
     const stations = (govData.results ?? []).map((r: Record<string, unknown>) => {
-      const geom = r.geom as { lon?: number; lat?: number } | null
+      const geom = r.geom as { lat?: number; lon?: number } | null
       const stLat = geom?.lat ?? 0
       const stLon = geom?.lon ?? 0
 
-      // Match with OSM by proximity (within 150m)
+      // Match nearest OSM station within 150m
       let brand = ''
       let bestDist = 150
       for (const osm of osmStations) {
         const d = haversine(stLat, stLon, osm.lat, osm.lon)
-        if (d < bestDist) {
-          bestDist = d
-          brand = normalizeBrand(osm.brand || osm.name)
-        }
+        if (d < bestDist) { bestDist = d; brand = osm.brand }
       }
 
       const fuels = FUEL_COLS
         .filter(f => r[f.col] != null)
-        .map(f => ({
-          name: f.name,
-          price: parseFloat(String(r[f.col])),
-          updated: (r[f.maj] as string) ?? null,
-        }))
+        .map(f => ({ name: f.name, price: parseFloat(String(r[f.col])), updated: (r[f.maj] as string) ?? null }))
 
       return {
-        id: String(r.id),
-        name: brand,
-        address: String(r.adresse ?? ''),
-        city: String(r.ville ?? ''),
-        lat: stLat, lon: stLon,
-        brand,
+        id: String(r.id), name: brand,
+        address: String(r.adresse ?? ''), city: String(r.ville ?? ''),
+        lat: stLat, lon: stLon, brand,
         pop: String(r.pop ?? ''),
         services: (r.services_service as string[]) ?? [],
         fuels,
       }
-    }).filter((s: {lat: number; lon: number; fuels: unknown[]}) => s.lat !== 0 && s.lon !== 0 && s.fuels.length > 0)
+    }).filter((s: { lat: number; lon: number; fuels: unknown[] }) => s.lat !== 0 && s.lon !== 0 && s.fuels.length > 0)
 
     return NextResponse.json({ stations, osm_count: osmStations.length })
   } catch (err) {
