@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 const FUEL_API = 'https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/records'
+const OVERPASS_API = 'https://overpass-api.de/api/interpreter'
 
 const FUEL_COLS = [
   { col: 'gazole_prix', maj: 'gazole_maj', name: 'Gazole' },
@@ -12,53 +13,112 @@ const FUEL_COLS = [
   { col: 'gplc_prix',   maj: 'gplc_maj',   name: 'GPLc'   },
 ]
 
-// Detect brand from services list and address
-function detectBrandFromServices(services: string[], adresse: string, pop: string): string {
-  const text = [...services, adresse].join(' ').toLowerCase()
-  if (/intermarché|intermarche/.test(text)) return 'Intermarché'
-  if (/carrefour/.test(text)) return 'Carrefour'
-  if (/leclerc/.test(text)) return 'E.Leclerc'
-  if (/auchan/.test(text)) return 'Auchan'
-  if (/super u|superu/.test(text)) return 'Super U'
-  if (/casino/.test(text)) return 'Casino'
-  if (/total/.test(text)) return 'TotalEnergies'
-  if (/bp\b/.test(text)) return 'BP'
-  if (/shell/.test(text)) return 'Shell'
-  if (/esso/.test(text)) return 'Esso'
-  if (pop === 'A') return 'Autoroute'
-  return ''
+interface OsmStation { lat: number; lon: number; brand: string; name: string }
+
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+}
+
+async function fetchOsmBrands(lat: number, lon: number, radiusM: number): Promise<OsmStation[]> {
+  // Slightly larger radius to cover all stations
+  const r = Math.min(radiusM + 500, 25000)
+  const query = `[out:json][timeout:10];
+(
+  node["amenity"="fuel"](around:${r},${lat},${lon});
+  way["amenity"="fuel"](around:${r},${lat},${lon});
+);
+out center tags;`
+
+  const res = await fetch(OVERPASS_API, {
+    method: 'POST',
+    body: `data=${encodeURIComponent(query)}`,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    signal: AbortSignal.timeout(8000),
+    cache: 'no-store',
+  })
+  if (!res.ok) return []
+  const data = await res.json()
+
+  return (data.elements ?? []).map((el: Record<string, unknown>) => {
+    const tags = (el.tags ?? {}) as Record<string, string>
+    const lat = typeof el.lat === 'number' ? el.lat : (el.center as {lat:number})?.lat ?? 0
+    const lon = typeof el.lon === 'number' ? el.lon : (el.center as {lon:number})?.lon ?? 0
+    return {
+      lat, lon,
+      brand: tags.brand ?? tags.operator ?? '',
+      name: tags.name ?? tags['brand:fr'] ?? '',
+    }
+  }).filter((s: OsmStation) => s.lat !== 0)
+}
+
+function normalizeBrand(raw: string): string {
+  if (!raw) return ''
+  const s = raw.toLowerCase().trim()
+  if (/intermarché|intermarche/.test(s)) return 'Intermarché'
+  if (/carrefour/.test(s)) return 'Carrefour'
+  if (/e\.?\s*leclerc|leclerc/.test(s)) return 'E.Leclerc'
+  if (/totalenergies|total/.test(s)) return 'TotalEnergies'
+  if (/bp\b/.test(s)) return 'BP'
+  if (/shell/.test(s)) return 'Shell'
+  if (/esso/.test(s)) return 'Esso'
+  if (/auchan/.test(s)) return 'Auchan'
+  if (/super\s*u\b/.test(s)) return 'Super U'
+  if (/casino/.test(s)) return 'Casino'
+  if (/netto/.test(s)) return 'Netto'
+  if (/avia/.test(s)) return 'Avia'
+  if (/dyneff/.test(s)) return 'Dyneff'
+  if (/q8/.test(s)) return 'Q8'
+  if (/pétrole|petrol|pem\b/.test(s)) return 'PEM'
+  // Return title-cased version of whatever is there
+  return raw.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
 }
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const lat = searchParams.get('lat')
-  const lon = searchParams.get('lon')
+  const lat = parseFloat(searchParams.get('lat') ?? '')
+  const lon = parseFloat(searchParams.get('lon') ?? '')
   const fuel = searchParams.get('fuel') || ''
-  const radius = searchParams.get('radius') || '5000'
-  if (!lat || !lon) return NextResponse.json({ error: 'Missing lat/lon' }, { status: 400 })
+  const radius = parseInt(searchParams.get('radius') ?? '5000')
+  if (isNaN(lat) || isNaN(lon)) return NextResponse.json({ error: 'Missing lat/lon' }, { status: 400 })
 
   try {
+    // Fetch gov prices + OSM brands in parallel
     const distanceClause = `distance(geom, geom'POINT(${lon} ${lat})', ${radius}m)`
     const fuelColEntry = fuel ? FUEL_COLS.find(f => f.name === fuel) : null
     const fuelClause = fuelColEntry ? ` AND ${fuelColEntry.col} IS NOT NULL` : ''
 
-    const url = new URL(FUEL_API)
-    url.searchParams.set('where', distanceClause + fuelClause)
-    url.searchParams.set('limit', '100')
-    url.searchParams.set('order_by', `distance(geom, geom'POINT(${lon} ${lat})')`)
+    const govUrl = new URL(FUEL_API)
+    govUrl.searchParams.set('where', distanceClause + fuelClause)
+    govUrl.searchParams.set('limit', '100')
+    govUrl.searchParams.set('order_by', `distance(geom, geom'POINT(${lon} ${lat})')`)
 
-    const res = await fetch(url.toString(), { cache: 'no-store' })
-    if (!res.ok) return NextResponse.json({ error: `Upstream ${res.status}` }, { status: 502 })
+    const [govRes, osmStations] = await Promise.all([
+      fetch(govUrl.toString(), { cache: 'no-store' }),
+      fetchOsmBrands(lat, lon, radius).catch(() => [] as OsmStation[]),
+    ])
 
-    const data = await res.json()
-    const raw: Record<string, unknown>[] = data.results ?? []
+    if (!govRes.ok) return NextResponse.json({ error: `Upstream ${govRes.status}` }, { status: 502 })
+    const govData = await govRes.json()
 
-    const stations = raw.map(r => {
+    const stations = (govData.results ?? []).map((r: Record<string, unknown>) => {
       const geom = r.geom as { lon?: number; lat?: number } | null
       const stLat = geom?.lat ?? 0
       const stLon = geom?.lon ?? 0
-      const services = (r.services_service as string[]) ?? []
-      const brand = detectBrandFromServices(services, String(r.adresse ?? ''), String(r.pop ?? ''))
+
+      // Match with OSM by proximity (within 150m)
+      let brand = ''
+      let bestDist = 150
+      for (const osm of osmStations) {
+        const d = haversine(stLat, stLon, osm.lat, osm.lon)
+        if (d < bestDist) {
+          bestDist = d
+          brand = normalizeBrand(osm.brand || osm.name)
+        }
+      }
 
       const fuels = FUEL_COLS
         .filter(f => r[f.col] != null)
@@ -76,12 +136,12 @@ export async function GET(req: NextRequest) {
         lat: stLat, lon: stLon,
         brand,
         pop: String(r.pop ?? ''),
-        services,
+        services: (r.services_service as string[]) ?? [],
         fuels,
       }
-    }).filter(s => s.lat !== 0 && s.lon !== 0 && s.fuels.length > 0)
+    }).filter((s: {lat: number; lon: number; fuels: unknown[]}) => s.lat !== 0 && s.lon !== 0 && s.fuels.length > 0)
 
-    return NextResponse.json({ stations })
+    return NextResponse.json({ stations, osm_count: osmStations.length })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
