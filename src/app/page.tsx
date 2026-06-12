@@ -33,6 +33,7 @@ export default function Home() {
   const [activeFuel, setActiveFuel] = useState('')
   const [radius, setRadius] = useState('5000')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [sortBy, setSortBy] = useState<'distance' | 'price'>('distance')
   const [isMobile, setIsMobile] = useState(false)
   const [winH, setWinH] = useState(700)
   const [sheetH, setSheetH] = useState(PEEK_H)
@@ -117,6 +118,18 @@ export default function Home() {
     setSheetH(closest)
   }
 
+  // Sorted stations
+  const sortedStations = [...stations].sort((a, b) => {
+    if (sortBy === 'price') {
+      const getPrice = (s: Station) => {
+        const fuels = activeFuel ? s.fuels.filter(f => f.name === activeFuel) : s.fuels
+        return fuels.length > 0 ? Math.min(...fuels.map(f => f.price)) : Infinity
+      }
+      return getPrice(a) - getPrice(b)
+    }
+    return (a.distance ?? 0) - (b.distance ?? 0)
+  })
+
   const cheapestByFuel: Record<string, number> = {}
   FUEL_TYPES.slice(1).forEach(({ id }) => {
     const prices = stations.flatMap(s => s.fuels.filter(f => f.name === id).map(f => f.price))
@@ -194,7 +207,7 @@ export default function Home() {
         }}>
           {location.status === 'ready' ? (
             <Map
-              stations={stations}
+              stations={sortedStations}
               userLat={location.lat}
               userLon={location.lon}
               selectedId={selectedId}
@@ -257,10 +270,10 @@ export default function Home() {
             background: '#0d0f14', borderLeft: '1px solid #1e2d40',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
-            <SidebarContent location={location} stations={stations} loading={loading}
+            <SidebarContent location={location} stations={sortedStations} loading={loading}
               selectedId={selectedId} activeFuel={activeFuel} radius={radius}
               onSelect={id => setSelectedId(id === selectedId ? null : id)}
-              onLocate={requestLocation} />
+              sortBy={sortBy} onSortChange={setSortBy} onLocate={requestLocation} />
           </aside>
         )}
 
@@ -309,8 +322,9 @@ export default function Home() {
                   }}>📍 Me localiser</button>
                 </div>
               )}
-              <SidebarContent location={location} stations={stations} loading={loading}
+              <SidebarContent location={location} stations={sortedStations} loading={loading}
                 selectedId={selectedId} activeFuel={activeFuel} radius={radius}
+                sortBy={sortBy} onSortChange={setSortBy}
                 onSelect={id => { setSelectedId(id === selectedId ? null : id); snapTo('half') }}
                 onLocate={requestLocation} />
             </div>
@@ -321,9 +335,10 @@ export default function Home() {
   )
 }
 
-function SidebarContent({ location, stations, loading, selectedId, activeFuel, radius, onSelect, onLocate }: {
+function SidebarContent({ location, stations, loading, selectedId, activeFuel, radius, sortBy, onSortChange, onSelect, onLocate }: {
   location: LocationState; stations: Station[]; loading: boolean
   selectedId: string | null; activeFuel: string; radius: string
+  sortBy: 'distance' | 'price'; onSortChange: (s: 'distance' | 'price') => void
   onSelect: (id: string) => void; onLocate: () => void
 }) {
   if (location.status === 'idle' || location.status === 'error') {
@@ -346,6 +361,22 @@ function SidebarContent({ location, stations, loading, selectedId, activeFuel, r
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {/* Sort toggle */}
+      {stations.length > 0 && (
+        <div style={{ display: 'flex', gap: '4px', marginBottom: '2px' }}>
+          {(['distance', 'price'] as const).map(s => (
+            <button key={s} onClick={() => onSortChange(s)} style={{
+              flex: 1, padding: '6px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+              background: sortBy === s ? '#f59e0b' : '#161a24',
+              color: sortBy === s ? '#0d0f14' : '#64748b',
+              border: `1px solid ${sortBy === s ? '#f59e0b' : '#1e2d40'}`,
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}>
+              {s === 'distance' ? '📍 Distance' : '💰 Prix croissant'}
+            </button>
+          ))}
+        </div>
+      )}
       {loading
         ? Array.from({ length: 5 }).map((_, i) => (
             <div key={i} style={{ background: '#161a24', borderRadius: '10px', height: '76px', opacity: 1 - i * 0.15 }} />
