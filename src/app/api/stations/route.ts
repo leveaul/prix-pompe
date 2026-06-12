@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const FUEL_API = 'https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/prix-des-carburants-en-france-flux-instantane-v2/records'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const lat = searchParams.get('lat')
@@ -18,47 +20,77 @@ export async function GET(req: NextRequest) {
     const fuelFilter = fuel ? ` AND carburant_nom="${fuel}"` : ''
     const where = distanceFilter + fuelFilter
 
-    const params = new URLSearchParams({
-      where,
-      limit: '100',
-      order_by: `distance(geom, geom'POINT(${lon} ${lat})')`,
-    })
+    const url = new URL(FUEL_API)
+    url.searchParams.set('where', where)
+    url.searchParams.set('limit', '100')
+    url.searchParams.set('order_by', `distance(geom, geom'POINT(${lon} ${lat})')`)
 
-    const res = await fetch(`${FUEL_API}?${params}`, {
+    const res = await fetch(url.toString(), {
       headers: { Accept: 'application/json' },
-      next: { revalidate: 300 },
+      cache: 'no-store',
     })
 
-    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    if (!res.ok) {
+      const errText = await res.text()
+      console.error('API error:', res.status, errText)
+      return NextResponse.json({ error: `Upstream error ${res.status}`, detail: errText }, { status: 502 })
+    }
+
     const data = await res.json()
+
+    // Inspect first record to understand field names
+    if (data.results?.length > 0) {
+      console.log('First record keys:', Object.keys(data.results[0]))
+      console.log('First record sample:', JSON.stringify(data.results[0]).slice(0, 500))
+    }
 
     // Group by station id to merge fuel types
     const stationsMap = new Map<string, Station>()
 
     for (const record of data.results ?? []) {
-      const id = record.id
+      // The API returns one row per fuel type per station
+      const id = String(record.id)
+
       if (!stationsMap.has(id)) {
+        // Try multiple possible coord field names
+        let lat_val: number | null = null
+        let lon_val: number | null = null
+
+        if (record.geom) {
+          lat_val = record.geom.lat ?? record.geom.latitude ?? null
+          lon_val = record.geom.lon ?? record.geom.longitude ?? null
+        }
+        if (!lat_val && record.latitude) {
+          // API returns coordinates * 100000 in some versions
+          lat_val = Math.abs(record.latitude) > 90 ? record.latitude / 100000 : record.latitude
+        }
+        if (!lon_val && record.longitude) {
+          lon_val = Math.abs(record.longitude) > 180 ? record.longitude / 100000 : record.longitude
+        }
+
         stationsMap.set(id, {
           id,
-          name: record.nom_station ?? record.enseignes ?? 'Station',
-          address: `${record.adresse ?? ''}, ${record.ville ?? ''}`.trim().replace(/^,\s*/, ''),
+          name: record.nom_station ?? record.enseignes ?? '',
+          address: [record.adresse, record.ville].filter(Boolean).join(', '),
           city: record.ville ?? '',
-          lat: record.latitude ? record.latitude / 100000 : record.geom?.lat,
-          lon: record.longitude ? record.longitude / 100000 : record.geom?.lon,
+          lat: lat_val ?? 0,
+          lon: lon_val ?? 0,
           fuels: [],
-          services: record.services_service ?? [],
           brand: record.enseignes ?? '',
           updated: record.carburant_maj ?? null,
         })
       }
 
       const station = stationsMap.get(id)!
-      if (record.carburant_nom && record.carburant_prix) {
-        const existing = station.fuels.find(f => f.name === record.carburant_nom)
+      const fuelName = record.carburant_nom
+      const fuelPrice = record.carburant_prix
+
+      if (fuelName && fuelPrice != null) {
+        const existing = station.fuels.find(f => f.name === fuelName)
         if (!existing) {
           station.fuels.push({
-            name: record.carburant_nom,
-            price: parseFloat(record.carburant_prix),
+            name: fuelName,
+            price: parseFloat(String(fuelPrice)),
             updated: record.carburant_maj ?? null,
           })
         }
@@ -66,13 +98,22 @@ export async function GET(req: NextRequest) {
     }
 
     const stations = Array.from(stationsMap.values()).filter(
-      s => s.lat && s.lon && s.fuels.length > 0
+      s => s.lat !== 0 && s.lon !== 0 && s.fuels.length > 0
     )
 
-    return NextResponse.json({ stations })
+    return NextResponse.json({
+      stations,
+      debug: {
+        total_raw: data.results?.length ?? 0,
+        total_count: data.total_count,
+        after_filter: stations.length,
+      }
+    }, {
+      headers: { 'Cache-Control': 'no-store' }
+    })
   } catch (err) {
-    console.error(err)
-    return NextResponse.json({ error: 'Failed to fetch fuel data' }, { status: 500 })
+    console.error('Station fetch error:', err)
+    return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
 
@@ -90,7 +131,6 @@ interface Station {
   lat: number
   lon: number
   fuels: Fuel[]
-  services: string[]
   brand: string
   updated: string | null
 }
