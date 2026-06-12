@@ -9,7 +9,7 @@ Peuple la table `station_brands` dans Supabase avec les marques OSM.
 ```bash
 # 1. Récupère la service key dans Supabase > Settings > API
 # 2. Lance le script :
-SUPABASE_URL=https://qgdcutklhgnlcrxuvgkn.supabase.co \
+SUPABASE_URL=https://yjwtjadjedpkgbdbqjim.supabase.co \
 SUPABASE_SERVICE_KEY=<ta_service_key> \
 node scripts/seed-brands.mjs
 ```
