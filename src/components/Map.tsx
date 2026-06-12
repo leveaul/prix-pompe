@@ -155,13 +155,5 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
-  return (
-    <>
-      <link
-        rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      />
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-    </>
-  )
+  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 }
