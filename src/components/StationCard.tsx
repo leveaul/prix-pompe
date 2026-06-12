@@ -14,7 +14,7 @@ interface Props {
 
 export default function StationCard({ station, userLat, userLon, selected, activeFuel, onClick }: Props) {
   const dist = haversineDistance(userLat, userLon, station.lat, station.lon)
-  const brand = getBrandInfo(station.brand)
+  const brand = getBrandInfo(station.brand, station.address)
 
   const displayFuels = activeFuel
     ? station.fuels.filter(f => f.name === activeFuel)

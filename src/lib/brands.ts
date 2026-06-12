@@ -15,11 +15,18 @@ const BRAND_MAP: Record<string, BrandInfo> = {
   'BP':            { label: 'BP',            emoji: '🟢', color: '#007a33' },
   'Shell':         { label: 'Shell',         emoji: '🟡', color: '#f5a500' },
   'Esso':          { label: 'Esso',          emoji: '🔵', color: '#003087' },
-  'Autoroute':     { label: 'Autoroute',     emoji: '🛣️', color: '#64748b' },
+  'Avia':          { label: 'Avia',          emoji: '🔴', color: '#e3000f' },
+  'Dyneff':        { label: 'Dyneff',        emoji: '⛽', color: '#64748b' },
+  'Q8':            { label: 'Q8',            emoji: '🟡', color: '#f5a500' },
+  'Netto':         { label: 'Netto',         emoji: '🟡', color: '#f0c300' },
+  'PEM':           { label: 'PEM',           emoji: '⛽', color: '#64748b' },
 }
 
-const DEFAULT: BrandInfo = { label: 'Station', emoji: '⛽', color: '#64748b' }
-
-export function getBrandInfo(brand: string): BrandInfo {
-  return BRAND_MAP[brand] ?? DEFAULT
+export function getBrandInfo(brand: string, address?: string): BrandInfo {
+  if (brand && BRAND_MAP[brand]) return BRAND_MAP[brand]
+  // Use first meaningful word of address as label if no brand
+  const label = address
+    ? address.replace(/^\d+[\s,]+/, '').split(',')[0].trim().slice(0, 28) || 'Station'
+    : 'Station'
+  return { label, emoji: '⛽', color: '#64748b' }
 }

@@ -61,7 +61,7 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
         const fuelColor = FUEL_COLORS[fuelToShow.name] ?? '#64748b'
         const isSelected = selectedId === station.id
         const dist = haversineDistance(userLat, userLon, station.lat, station.lon)
-        const brand = getBrandInfo(station.brand)
+        const brand = getBrandInfo(station.brand, station.address)
 
         const icon = L.divIcon({
           html: `
