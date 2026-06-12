@@ -4,37 +4,25 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const results: Record<string, unknown> = {}
 
-  // Test Overpass
+  // Test Overpass with ref:FR:prix-carburants
   try {
-    const query = `[out:json][timeout:5];node["amenity"="fuel"](around:500,48.8566,2.3522);out tags;`
+    const query = `[out:json][timeout:8];node["amenity"="fuel"]["ref:FR:prix-carburants"~"75013"](around:10000,48.8566,2.3522);out tags;`
     const r = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: `data=${encodeURIComponent(query)}`,
+      method: 'POST', body: `data=${encodeURIComponent(query)}`,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(9000),
     })
     const text = await r.text()
-    results.overpass = { status: r.status, body_start: text.slice(0, 200) }
-  } catch (e) { results.overpass = { error: String(e) } }
+    results.overpass_ref = { status: r.status, length: text.length, start: text.slice(0, 400) }
+  } catch (e) { results.overpass_ref = { error: String(e) } }
 
-  // Test Nominatim
+  // Test roulez-eco XML feed (has station names)
   try {
-    const r = await fetch('https://nominatim.openstreetmap.org/reverse?lat=48.835&lon=2.358&format=json', {
-      headers: { 'User-Agent': 'PrixPompe/1.0' },
-      signal: AbortSignal.timeout(5000),
+    const r = await fetch('https://donnees.roulez-eco.fr/opendata/instantane', {
+      signal: AbortSignal.timeout(8000),
     })
-    const text = await r.text()
-    results.nominatim = { status: r.status, body_start: text.slice(0, 200) }
-  } catch (e) { results.nominatim = { error: String(e) } }
-
-  // Test api-adresse.data.gouv.fr
-  try {
-    const r = await fetch('https://api-adresse.data.gouv.fr/search/?q=114+BD+DE+L+HOPITAL+Paris&limit=1', {
-      signal: AbortSignal.timeout(5000),
-    })
-    const text = await r.text()
-    results.adresse_gouv = { status: r.status, body_start: text.slice(0, 200) }
-  } catch (e) { results.adresse_gouv = { error: String(e) } }
+    results.roulez_eco = { status: r.status, content_type: r.headers.get('content-type'), size: r.headers.get('content-length') }
+  } catch (e) { results.roulez_eco = { error: String(e) } }
 
   return NextResponse.json(results)
 }
