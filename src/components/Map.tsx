@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import type { Station } from '@/lib/types'
 import { FUEL_COLORS } from '@/lib/types'
 import { formatPrice, formatDistance, haversineDistance } from '@/lib/utils'
+import { detectBrand } from '@/lib/brands'
 
 interface Props {
   stations: Station[]
@@ -12,9 +13,10 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string) => void
   activeFuel: string
+  bottomOffset?: number
 }
 
-export default function Map({ stations, userLat, userLon, selectedId, onSelect, activeFuel }: Props) {
+export default function Map({ stations, userLat, userLon, selectedId, onSelect, activeFuel, bottomOffset = 0 }: Props) {
   const mapRef = useRef<unknown>(null)
   const markersRef = useRef<globalThis.Map<string, unknown>>(new globalThis.Map())
   const containerRef = useRef<HTMLDivElement>(null)
@@ -22,9 +24,7 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
 
-    // Dynamic import to avoid SSR
     import('leaflet').then(L => {
-      // Fix default icon paths
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       delete (L.Icon.Default.prototype as any)._getIconUrl
       L.Icon.Default.mergeOptions({
@@ -33,27 +33,20 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       })
 
-      const map = L.map(containerRef.current!, {
-        center: [userLat, userLon],
-        zoom: 13,
-        zoomControl: true,
-      })
+      const map = L.map(containerRef.current!, { center: [userLat, userLon], zoom: 13 })
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
+        attribution: '© OpenStreetMap',
         maxZoom: 19,
       }).addTo(map)
 
-      // User location marker
+      // User location
       const userIcon = L.divIcon({
-        html: `<div style="width:16px;height:16px;border-radius:50%;background:#f59e0b;border:3px solid #fff;box-shadow:0 0 0 3px rgba(245,158,11,0.4)" class="pulse-dot"></div>`,
-        className: '',
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
+        html: `<div style="width:14px;height:14px;border-radius:50%;background:#f59e0b;border:3px solid #fff;box-shadow:0 0 0 3px rgba(245,158,11,0.35)" class="pulse-dot"></div>`,
+        className: '', iconSize: [14, 14], iconAnchor: [7, 7],
       })
-      L.marker([userLat, userLon], { icon: userIcon })
-        .addTo(map)
-        .bindPopup('<div style="padding:8px;font-weight:600;color:#f59e0b">📍 Ma position</div>')
+      L.marker([userLat, userLon], { icon: userIcon }).addTo(map)
+        .bindPopup('<div style="padding:6px 8px;font-weight:600;color:#f59e0b;font-size:13px;">📍 Ma position</div>')
 
       mapRef.current = map
     })
@@ -69,60 +62,73 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Update markers when stations change
+  // Update markers
   useEffect(() => {
     if (!mapRef.current) return
 
     import('leaflet').then(L => {
       const map = mapRef.current as ReturnType<typeof L.map>
-
-      // Remove old markers
       markersRef.current.forEach(m => (m as ReturnType<typeof L.marker>).remove())
       markersRef.current.clear()
 
       stations.forEach(station => {
         const fuelToShow = activeFuel
           ? station.fuels.find(f => f.name === activeFuel)
-          : station.fuels.reduce((a, b) => (a.price < b.price ? a : b), station.fuels[0])
+          : station.fuels.reduce((a, b) => a.price < b.price ? a : b, station.fuels[0])
 
         if (!fuelToShow) return
 
-        const color = FUEL_COLORS[fuelToShow.name] ?? '#64748b'
+        const fuelColor = FUEL_COLORS[fuelToShow.name] ?? '#64748b'
         const isSelected = selectedId === station.id
         const dist = haversineDistance(userLat, userLon, station.lat, station.lon)
+        const brand = detectBrand(station.name, station.address)
 
+        // Marker: brand emoji + price
         const icon = L.divIcon({
           html: `
             <div style="
-              background:${isSelected ? color : '#161a24'};
-              border:2px solid ${color};
-              border-radius:8px;
-              padding:3px 6px;
-              font-size:11px;
-              font-weight:700;
-              color:${isSelected ? '#0d0f14' : color};
+              display:flex;align-items:center;gap:4px;
+              background:${isSelected ? fuelColor : '#161a24'};
+              border:2px solid ${fuelColor};
+              border-radius:10px;
+              padding:3px 7px 3px 5px;
+              font-size:11px;font-weight:700;
+              color:${isSelected ? '#0d0f14' : fuelColor};
               white-space:nowrap;
-              box-shadow:0 2px 8px rgba(0,0,0,0.5);
+              box-shadow:0 2px 8px rgba(0,0,0,0.55);
               transform:${isSelected ? 'scale(1.15)' : 'scale(1)'};
-              transition:all 0.2s;
+              transition:all 0.15s;
             ">
-              ${fuelToShow.price.toFixed(3)}
+              <span style="font-size:13px;line-height:1">${brand.emoji}</span>
+              <span>${fuelToShow.price.toFixed(3)}</span>
             </div>
+            <div style="
+              width:0;height:0;
+              border-left:5px solid transparent;border-right:5px solid transparent;
+              border-top:5px solid ${fuelColor};
+              margin:0 auto;width:10px;
+            "></div>
           `,
           className: '',
-          iconSize: [60, 26],
-          iconAnchor: [30, 26],
+          iconSize: [80, 34],
+          iconAnchor: [40, 34],
         })
 
         const popupContent = `
-          <div style="padding:12px;min-width:200px;">
-            <div style="font-weight:700;font-size:14px;margin-bottom:4px;">${station.name || station.brand || 'Station'}</div>
-            <div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">${station.address} · ${formatDistance(dist)}</div>
-            <div style="display:flex;flex-direction:column;gap:4px;">
-              ${station.fuels.map(f => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#0d0f14;border-radius:6px;">
-                  <span style="color:${FUEL_COLORS[f.name] ?? '#64748b'};font-weight:600;font-size:12px;">${f.name}</span>
-                  <span style="font-weight:700;font-size:13px;">${formatPrice(f.price)}</span>
+          <div style="padding:10px 12px;min-width:190px;font-family:system-ui,sans-serif;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:18px">${brand.emoji}</span>
+              <div>
+                <div style="font-weight:700;font-size:13px;color:#f1f5f9">${brand.label}</div>
+                <div style="font-size:11px;color:#64748b">${station.address}</div>
+              </div>
+            </div>
+            <div style="font-size:11px;color:#475569;margin-bottom:8px;">📍 ${formatDistance(dist)}</div>
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              ${station.fuels.sort((a,b) => a.price - b.price).map(f => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 7px;background:#0d0f14;border-radius:5px;">
+                  <span style="color:${FUEL_COLORS[f.name] ?? '#64748b'};font-weight:700;font-size:11px">${f.name}</span>
+                  <span style="font-weight:700;font-size:12px;color:#f1f5f9">${formatPrice(f.price)}</span>
                 </div>
               `).join('')}
             </div>
@@ -131,13 +137,13 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
 
         const marker = L.marker([station.lat, station.lon], { icon })
           .addTo(map)
-          .bindPopup(popupContent, { maxWidth: 260 })
+          .bindPopup(popupContent, { maxWidth: 240 })
           .on('click', () => onSelect(station.id))
 
         markersRef.current.set(station.id, marker)
       })
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stations, selectedId, activeFuel])
 
   // Pan to selected
@@ -148,11 +154,15 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
 
     import('leaflet').then(L => {
       const map = mapRef.current as ReturnType<typeof L.map>
-      map.panTo([station.lat, station.lon], { animate: true })
+      // Offset pan to account for bottom sheet
+      const point = map.latLngToContainerPoint([station.lat, station.lon])
+      const offsetPoint = L.point(point.x, point.y + bottomOffset / 2)
+      const offsetLatLng = map.containerPointToLatLng(offsetPoint)
+      map.panTo(offsetLatLng, { animate: true })
       const marker = markersRef.current.get(selectedId) as ReturnType<typeof L.marker> | undefined
-      if (marker) marker.openPopup()
+      if (marker) setTimeout(() => marker.openPopup(), 300)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />

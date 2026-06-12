@@ -22,9 +22,9 @@ type LocationState =
   | { status: 'ready'; lat: number; lon: number }
   | { status: 'error'; message: string }
 
-const PEEK_H = 100
-const HALF_RATIO = 0.45
-const FULL_RATIO = 0.88
+const PEEK_H = 80
+const HALF_RATIO = 0.44
+const FULL_RATIO = 0.86
 
 export default function Home() {
   const [location, setLocation] = useState<LocationState>({ status: 'idle' })
@@ -35,27 +35,30 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [winH, setWinH] = useState(700)
-
-  // Bottom sheet height in px
   const [sheetH, setSheetH] = useState(PEEK_H)
+
   const isDragging = useRef(false)
   const dragStartY = useRef(0)
   const dragStartH = useRef(0)
+  const isAnimating = useRef(false)
 
   useEffect(() => {
-    const update = () => {
-      setIsMobile(window.innerWidth < 768)
-      setWinH(window.innerHeight)
-    }
+    const update = () => { setIsMobile(window.innerWidth < 768); setWinH(window.innerHeight) }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
 
+  const peekH = PEEK_H
+  const halfH = Math.round(winH * HALF_RATIO)
+  const fullH = Math.round(winH * FULL_RATIO)
+
   const snapTo = useCallback((target: 'peek' | 'half' | 'full') => {
-    const h = target === 'peek' ? PEEK_H : target === 'half' ? Math.round(winH * HALF_RATIO) : Math.round(winH * FULL_RATIO)
+    const h = target === 'peek' ? peekH : target === 'half' ? halfH : fullH
+    isAnimating.current = true
     setSheetH(h)
-  }, [winH])
+    setTimeout(() => { isAnimating.current = false }, 300)
+  }, [peekH, halfH, fullH])
 
   const fetchStations = useCallback(async (lat: number, lon: number, fuel: string, rad: string) => {
     setLoading(true)
@@ -64,18 +67,14 @@ export default function Home() {
       const data = await res.json()
       if (data.stations) {
         const withDist = data.stations.map((s: Station) => ({
-          ...s,
-          distance: haversineDistance(lat, lon, s.lat, s.lon),
+          ...s, distance: haversineDistance(lat, lon, s.lat, s.lon),
         }))
         withDist.sort((a: Station, b: Station) => (a.distance ?? 0) - (b.distance ?? 0))
         setStations(withDist)
         if (withDist.length > 0) snapTo('half')
       }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
   }, [snapTo])
 
   const requestLocation = useCallback(() => {
@@ -92,47 +91,39 @@ export default function Home() {
   }, [activeFuel, radius, fetchStations])
 
   useEffect(() => {
-    if (location.status === 'ready') {
-      fetchStations(location.lat, location.lon, activeFuel, radius)
-    }
+    if (location.status === 'ready') fetchStations(location.lat, location.lon, activeFuel, radius)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFuel, radius])
 
-  // Drag handlers
-  const onDragStart = (e: React.TouchEvent | React.PointerEvent) => {
+  // Drag
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
     isDragging.current = true
-    dragStartY.current = 'touches' in e ? e.touches[0].clientY : e.clientY
+    dragStartY.current = e.clientY
     dragStartH.current = sheetH
-    if ('pointerId' in e) (e.target as HTMLElement).setPointerCapture(e.pointerId)
   }
-
-  const onDragMove = (e: React.TouchEvent | React.PointerEvent) => {
+  const onPointerMove = (e: React.PointerEvent) => {
     if (!isDragging.current) return
-    const y = 'touches' in e ? e.touches[0].clientY : e.clientY
-    const delta = dragStartY.current - y
-    const newH = Math.max(PEEK_H, Math.min(Math.round(winH * FULL_RATIO), dragStartH.current + delta))
+    const delta = dragStartY.current - e.clientY
+    const newH = Math.max(peekH, Math.min(fullH, dragStartH.current + delta))
     setSheetH(newH)
   }
-
-  const onDragEnd = () => {
+  const onPointerUp = () => {
     if (!isDragging.current) return
     isDragging.current = false
-    // Snap to nearest
-    const peekH = PEEK_H
-    const halfH = Math.round(winH * HALF_RATIO)
-    const fullH = Math.round(winH * FULL_RATIO)
+    // snap to nearest
     const snaps = [peekH, halfH, fullH]
     const closest = snaps.reduce((a, b) => Math.abs(a - sheetH) < Math.abs(b - sheetH) ? a : b)
     setSheetH(closest)
   }
 
   const cheapestByFuel: Record<string, number> = {}
-  if (stations.length > 0) {
-    FUEL_TYPES.slice(1).forEach(({ id }) => {
-      const prices = stations.flatMap(s => s.fuels.filter(f => f.name === id).map(f => f.price))
-      if (prices.length > 0) cheapestByFuel[id] = Math.min(...prices)
-    })
-  }
+  FUEL_TYPES.slice(1).forEach(({ id }) => {
+    const prices = stations.flatMap(s => s.fuels.filter(f => f.name === id).map(f => f.price))
+    if (prices.length > 0) cheapestByFuel[id] = Math.min(...prices)
+  })
+
+  const isSheetUp = sheetH > peekH + 20
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#0d0f14', overflow: 'hidden' }}>
@@ -164,7 +155,7 @@ export default function Home() {
         )}
       </header>
 
-      {/* Fuel filter bar */}
+      {/* Fuel filters */}
       <div style={{
         display: 'flex', gap: '6px', padding: '8px 12px',
         background: '#0d0f14', borderBottom: '1px solid #1e2d40',
@@ -193,10 +184,13 @@ export default function Home() {
       {/* Main */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
 
-        {/* Map — full on mobile, left panel on desktop */}
+        {/* Map */}
         <div style={{
-          position: 'absolute', inset: 0,
-          right: isMobile ? 0 : '360px',
+          position: 'absolute',
+          top: 0, left: 0, right: isMobile ? 0 : '360px',
+          // On mobile, shrink map so it never goes behind the sheet
+          bottom: isMobile ? `${sheetH}px` : 0,
+          transition: isDragging.current ? 'none' : 'bottom 0.28s cubic-bezier(0.32,0.72,0,1)',
         }}>
           {location.status === 'ready' ? (
             <Map
@@ -204,8 +198,9 @@ export default function Home() {
               userLat={location.lat}
               userLon={location.lon}
               selectedId={selectedId}
-              onSelect={id => setSelectedId(id === selectedId ? null : id)}
+              onSelect={id => { setSelectedId(id === selectedId ? null : id); if (isMobile) snapTo('half') }}
               activeFuel={activeFuel}
+              bottomOffset={sheetH}
             />
           ) : (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
@@ -226,6 +221,35 @@ export default function Home() {
           )}
         </div>
 
+        {/* Floating action button — visible only when sheet is peeking */}
+        {isMobile && !isSheetUp && location.status === 'ready' && (
+          <button
+            onClick={() => snapTo('half')}
+            style={{
+              position: 'absolute',
+              bottom: `${peekH + 16}px`,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 150,
+              background: '#f59e0b',
+              color: '#0d0f14',
+              border: 'none',
+              borderRadius: '99px',
+              padding: '10px 20px',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            ≡ {loading ? 'Chargement…' : `${stations.length} station${stations.length > 1 ? 's' : ''}`}
+          </button>
+        )}
+
         {/* Desktop sidebar */}
         {!isMobile && (
           <aside style={{
@@ -242,62 +266,49 @@ export default function Home() {
 
         {/* Mobile bottom sheet */}
         {isMobile && (
-          <div
-            style={{
-              position: 'absolute', left: 0, right: 0, bottom: 0,
-              height: `${sheetH}px`,
-              background: '#0d0f14',
-              borderTop: '1px solid #1e2d40',
-              borderRadius: '18px 18px 0 0',
-              transition: isDragging.current ? 'none' : 'height 0.28s cubic-bezier(0.32,0.72,0,1)',
-              display: 'flex', flexDirection: 'column',
-              zIndex: 100,
-              boxShadow: '0 -4px 24px rgba(0,0,0,0.45)',
-              willChange: 'height',
-            }}
-          >
-            {/* Drag handle zone */}
+          <div style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0,
+            height: `${sheetH}px`,
+            background: '#0d0f14',
+            borderTop: '1px solid #1e2d40',
+            borderRadius: '18px 18px 0 0',
+            transition: isDragging.current ? 'none' : 'height 0.28s cubic-bezier(0.32,0.72,0,1)',
+            display: 'flex', flexDirection: 'column',
+            zIndex: 100,
+            boxShadow: '0 -4px 24px rgba(0,0,0,0.4)',
+            willChange: 'height',
+          }}>
+            {/* Drag handle */}
             <div
               style={{
-                padding: '10px 0 8px',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
-                flexShrink: 0, cursor: 'ns-resize',
-                touchAction: 'none',
-                userSelect: 'none',
+                padding: '10px 0 8px', flexShrink: 0,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px',
+                cursor: 'ns-resize', touchAction: 'none', userSelect: 'none',
               }}
-              onPointerDown={onDragStart}
-              onPointerMove={onDragMove}
-              onPointerUp={onDragEnd}
-              onPointerCancel={onDragEnd}
-              onTouchStart={onDragStart as unknown as React.TouchEventHandler}
-              onTouchMove={onDragMove as unknown as React.TouchEventHandler}
-              onTouchEnd={onDragEnd}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerUp}
             >
               <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#2d3f55' }} />
               <div style={{ fontSize: '11px', color: '#475569', pointerEvents: 'none' }}>
-                {loading ? 'Recherche…'
+                {loading ? '⏳ Recherche…'
                   : stations.length > 0 ? `${stations.length} station${stations.length > 1 ? 's' : ''} · ${RADIUS_OPTIONS.find(o => o.value === radius)?.label}`
                   : location.status === 'ready' ? 'Aucune station'
                   : ''}
               </div>
             </div>
 
-            {/* Snap buttons */}
-            {sheetH <= PEEK_H + 20 && location.status !== 'ready' && (
-              <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '12px' }}>
-                <button onClick={requestLocation} style={{
-                  background: '#f59e0b', color: '#0d0f14', border: 'none',
-                  borderRadius: '10px', padding: '8px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
-                }}>📍 Me localiser</button>
-              </div>
-            )}
-
-            {/* List */}
-            <div style={{
-              flex: 1,
-              overflowY: sheetH > PEEK_H + 30 ? 'auto' : 'hidden',
-              padding: '0 10px 20px',
-            }}>
+            {/* Content scrollable */}
+            <div style={{ flex: 1, overflowY: sheetH > peekH + 20 ? 'auto' : 'hidden', padding: '0 10px 20px' }}>
+              {location.status !== 'ready' && location.status !== 'loading' && (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 16px' }}>
+                  <button onClick={requestLocation} style={{
+                    background: '#f59e0b', color: '#0d0f14', border: 'none',
+                    borderRadius: '10px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+                  }}>📍 Me localiser</button>
+                </div>
+              )}
               <SidebarContent location={location} stations={stations} loading={loading}
                 selectedId={selectedId} activeFuel={activeFuel} radius={radius}
                 onSelect={id => { setSelectedId(id === selectedId ? null : id); snapTo('half') }}
@@ -311,21 +322,16 @@ export default function Home() {
 }
 
 function SidebarContent({ location, stations, loading, selectedId, activeFuel, radius, onSelect, onLocate }: {
-  location: LocationState
-  stations: Station[]
-  loading: boolean
-  selectedId: string | null
-  activeFuel: string
-  radius: string
-  onSelect: (id: string) => void
-  onLocate: () => void
+  location: LocationState; stations: Station[]; loading: boolean
+  selectedId: string | null; activeFuel: string; radius: string
+  onSelect: (id: string) => void; onLocate: () => void
 }) {
   if (location.status === 'idle' || location.status === 'error') {
     return (
-      <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-        {location.status === 'error' && <p style={{ color: '#ef4444', fontSize: '12px', marginBottom: '12px' }}>{location.message}</p>}
-        <div style={{ fontSize: '36px', marginBottom: '12px' }}>📍</div>
-        <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '20px', lineHeight: 1.6 }}>
+      <div style={{ padding: '24px 20px', textAlign: 'center' }}>
+        {location.status === 'error' && <p style={{ color: '#ef4444', fontSize: '12px', marginBottom: '8px' }}>{location.message}</p>}
+        <div style={{ fontSize: '32px', marginBottom: '10px' }}>📍</div>
+        <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '16px', lineHeight: 1.5 }}>
           Autorisez la localisation pour voir les prix en temps réel.
         </p>
         <button onClick={onLocate} style={{
@@ -336,7 +342,7 @@ function SidebarContent({ location, stations, loading, selectedId, activeFuel, r
     )
   }
   if (location.status === 'loading') {
-    return <div style={{ padding: '32px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>Localisation…</div>
+    return <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>Localisation…</div>
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
