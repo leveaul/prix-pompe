@@ -32,7 +32,7 @@ export default function StationCard({ station, userLat, userLon, selected, activ
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '7px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: '20px', flexShrink: 0 }}>{brand.emoji}</span>
+          <span style={{ fontSize: '20px', flexShrink: 0 }}>{brand.logo ? `<img src="${brand.logo}" style="width:20px;height:20px;object-fit:contain" />` : "⛽"}</span>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: '13px', color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {brand.label}

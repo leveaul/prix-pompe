@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react'
 import type { Station } from '@/lib/types'
 import { FUEL_COLORS } from '@/lib/types'
-import { formatPrice, formatDistance, haversineDistance } from '@/lib/utils'
+import { formatPrice, formatDistance, haversineDistance as haversine } from '@/lib/utils'
 import { getBrandInfo } from '@/lib/brands'
 
 interface Props {
@@ -12,6 +12,65 @@ interface Props {
   onSelect: (id: string) => void
   activeFuel: string
   bottomOffset?: number
+}
+
+// Cache logos en base64 pour éviter les requêtes répétées
+const logoCache: Map<string, string> = new globalThis.Map()
+
+async function getLogoDataUrl(url: string): Promise<string> {
+  if (logoCache.has(url)) return logoCache.get(url)!
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error()
+    const blob = await res.blob()
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => { const r = reader.result as string; logoCache.set(url, r); resolve(r) }
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    return ''
+  }
+}
+
+function makeMarkerHtml(
+  price: string,
+  fuelColor: string,
+  isSelected: boolean,
+  logoDataUrl: string,
+  label: string
+): string {
+  const bg = isSelected ? fuelColor : '#161a24'
+  const textColor = isSelected ? '#0d0f14' : fuelColor
+  const scale = isSelected ? 'scale(1.18)' : 'scale(1)'
+  const shadow = isSelected
+    ? `0 4px 16px ${fuelColor}66`
+    : '0 2px 8px rgba(0,0,0,0.6)'
+
+  const logoHtml = logoDataUrl
+    ? `<img src="${logoDataUrl}" style="width:18px;height:18px;object-fit:contain;flex-shrink:0;border-radius:2px" />`
+    : `<span style="font-size:11px;font-weight:800;color:${textColor};flex-shrink:0;max-width:36px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label.slice(0, 6)}</span>`
+
+  return `
+    <div style="
+      display:flex;align-items:center;gap:4px;
+      background:${bg};
+      border:2px solid ${fuelColor};
+      border-radius:10px;
+      padding:3px 7px 3px 4px;
+      font-size:11px;font-weight:700;
+      color:${textColor};
+      white-space:nowrap;
+      box-shadow:${shadow};
+      transform:${scale};
+      transition:all 0.15s;
+    ">
+      ${logoHtml}
+      <span>${price}</span>
+    </div>
+    <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid ${fuelColor};margin:0 auto;"></div>
+  `
 }
 
 export default function Map({ stations, userLat, userLon, selectedId, onSelect, activeFuel, bottomOffset = 0 }: Props) {
@@ -47,10 +106,23 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
 
   useEffect(() => {
     if (!mapRef.current) return
-    import('leaflet').then(L => {
+    import('leaflet').then(async L => {
       const map = mapRef.current as ReturnType<typeof L.map>
       markersRef.current.forEach(m => (m as ReturnType<typeof L.marker>).remove())
       markersRef.current.clear()
+
+      // Pre-fetch logos for visible brands
+      const brandsNeeded = new Set(stations.map(s => s.brand).filter(Boolean))
+      const logoMap: globalThis.Map<string, string> = new globalThis.Map()
+      await Promise.all(
+        Array.from(brandsNeeded).map(async brand => {
+          const info = getBrandInfo(brand)
+          if (info.logo) {
+            const dataUrl = await getLogoDataUrl(info.logo)
+            if (dataUrl) logoMap.set(brand, dataUrl)
+          }
+        })
+      )
 
       stations.forEach(station => {
         const fuelToShow = activeFuel
@@ -60,24 +132,21 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
 
         const fuelColor = FUEL_COLORS[fuelToShow.name] ?? '#64748b'
         const isSelected = selectedId === station.id
-        const dist = haversineDistance(userLat, userLon, station.lat, station.lon)
+        const dist = haversine(userLat, userLon, station.lat, station.lon)
         const brand = getBrandInfo(station.brand, station.address)
+        const logoDataUrl = logoMap.get(station.brand) ?? ''
 
         const icon = L.divIcon({
-          html: `
-            <div style="display:flex;align-items:center;gap:3px;background:${isSelected ? fuelColor : '#161a24'};border:2px solid ${fuelColor};border-radius:10px;padding:3px 7px 3px 5px;font-size:11px;font-weight:700;color:${isSelected ? '#0d0f14' : fuelColor};white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.55);transform:${isSelected ? 'scale(1.15)' : 'scale(1)'};transition:all 0.15s;">
-              <span style="font-size:12px;line-height:1">${brand.emoji}</span>
-              <span>${fuelToShow.price.toFixed(3)}</span>
-            </div>
-            <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid ${fuelColor};margin:0 auto;"></div>
-          `,
-          className: '', iconSize: [76, 32], iconAnchor: [38, 32],
+          html: makeMarkerHtml(fuelToShow.price.toFixed(3), fuelColor, isSelected, logoDataUrl, brand.label),
+          className: '',
+          iconSize: [90, 34],
+          iconAnchor: [45, 34],
         })
 
         const popup = `
           <div style="padding:10px 12px;min-width:185px;font-family:system-ui,sans-serif;">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-              <span style="font-size:20px">${brand.emoji}</span>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              ${logoDataUrl ? `<img src="${logoDataUrl}" style="width:32px;height:32px;object-fit:contain" />` : '<span style="font-size:20px">⛽</span>'}
               <div>
                 <div style="font-weight:700;font-size:13px;color:#f1f5f9">${brand.label}</div>
                 <div style="font-size:11px;color:#64748b">${station.address}${station.city ? ', ' + station.city : ''}</div>
