@@ -39,33 +39,20 @@ function makeMarkerHtml(
   fuelColor: string,
   isSelected: boolean,
   logoDataUrl: string,
-  label: string
+  short: string,
+  color: string
 ): string {
   const bg = isSelected ? fuelColor : '#161a24'
   const textColor = isSelected ? '#0d0f14' : fuelColor
   const scale = isSelected ? 'scale(1.18)' : 'scale(1)'
-  const shadow = isSelected
-    ? `0 4px 16px ${fuelColor}66`
-    : '0 2px 8px rgba(0,0,0,0.6)'
+  const shadow = isSelected ? `0 4px 16px ${fuelColor}66` : '0 2px 8px rgba(0,0,0,0.6)'
 
   const logoHtml = logoDataUrl
-    ? `<img src="${logoDataUrl}" style="width:18px;height:18px;object-fit:contain;flex-shrink:0;border-radius:2px" />`
-    : `<span style="font-size:11px;font-weight:800;color:${textColor};flex-shrink:0;max-width:36px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label.slice(0, 6)}</span>`
+    ? `<img src="${logoDataUrl}" style="width:16px;height:16px;object-fit:contain;flex-shrink:0;border-radius:2px" />`
+    : `<div style="width:16px;height:16px;border-radius:50%;background:${color};color:#fff;font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">${short.slice(0,2).toUpperCase()}</div>`
 
   return `
-    <div style="
-      display:flex;align-items:center;gap:4px;
-      background:${bg};
-      border:2px solid ${fuelColor};
-      border-radius:10px;
-      padding:3px 7px 3px 4px;
-      font-size:11px;font-weight:700;
-      color:${textColor};
-      white-space:nowrap;
-      box-shadow:${shadow};
-      transform:${scale};
-      transition:all 0.15s;
-    ">
+    <div style="display:flex;align-items:center;gap:4px;background:${bg};border:2px solid ${fuelColor};border-radius:10px;padding:3px 7px 3px 4px;font-size:11px;font-weight:700;color:${textColor};white-space:nowrap;box-shadow:${shadow};transform:${scale};transition:all 0.15s;">
       ${logoHtml}
       <span>${price}</span>
     </div>
@@ -137,7 +124,7 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
         const logoDataUrl = logoMap.get(station.brand) ?? ''
 
         const icon = L.divIcon({
-          html: makeMarkerHtml(fuelToShow.price.toFixed(3), fuelColor, isSelected, logoDataUrl, brand.label),
+          html: makeMarkerHtml(fuelToShow.price.toFixed(3), fuelColor, isSelected, logoDataUrl, brand.short, brand.color),
           className: '',
           iconSize: [90, 34],
           iconAnchor: [45, 34],

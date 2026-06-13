@@ -1,4 +1,5 @@
 'use client'
+import { useState } from 'react'
 import type { Station } from '@/lib/types'
 import { FUEL_COLORS } from '@/lib/types'
 import { formatDistance, formatDate, haversineDistance } from '@/lib/utils'
@@ -12,15 +13,36 @@ interface Props {
   onClick: () => void
 }
 
+function BrandLogo({ logo, label, color }: { logo: string | null; label: string; color: string }) {
+  const [failed, setFailed] = useState(false)
+  if (!logo || failed) {
+    // Fallback: cercle coloré avec initiales
+    const initials = label.slice(0, 2).toUpperCase()
+    return (
+      <div style={{
+        width: 24, height: 24, borderRadius: '50%',
+        background: color, color: '#fff',
+        fontSize: 9, fontWeight: 800,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+      }}>{initials}</div>
+    )
+  }
+  return (
+    <img
+      src={logo}
+      onError={() => setFailed(true)}
+      style={{ width: 24, height: 24, objectFit: 'contain', flexShrink: 0 }}
+    />
+  )
+}
+
 export default function StationCard({ station, userLat, userLon, selected, activeFuel, onClick }: Props) {
   const dist = haversineDistance(userLat, userLon, station.lat, station.lon)
   const brand = getBrandInfo(station.brand, station.address)
-
   const displayFuels = activeFuel
     ? station.fuels.filter(f => f.name === activeFuel)
     : [...station.fuels].sort((a, b) => a.price - b.price)
-
-  const primaryFuel = displayFuels[0]
 
   return (
     <div onClick={onClick} style={{
@@ -31,14 +53,14 @@ export default function StationCard({ station, userLat, userLon, selected, activ
       cursor: 'pointer', transition: 'all 0.15s',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '7px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: '20px', flexShrink: 0 }}>{brand.logo ? `<img src="${brand.logo}" style="width:20px;height:20px;object-fit:contain" />` : "⛽"}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
+          <BrandLogo logo={brand.logo} label={brand.label} color={brand.color} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: '13px', color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {brand.label}
             </div>
             <div style={{ fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {station.address}
+              {station.address}{station.city ? `, ${station.city}` : ''}
             </div>
           </div>
         </div>
@@ -61,9 +83,9 @@ export default function StationCard({ station, userLat, userLon, selected, activ
         ))}
       </div>
 
-      {primaryFuel?.updated && (
+      {displayFuels[0]?.updated && (
         <div style={{ fontSize: '10px', color: '#475569', marginTop: '5px' }}>
-          Màj {formatDate(primaryFuel.updated)}
+          Màj {formatDate(displayFuels[0].updated)}
         </div>
       )}
     </div>
