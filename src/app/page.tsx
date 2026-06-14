@@ -80,14 +80,21 @@ export default function Home() {
 
   const requestLocation = useCallback(() => {
     setLocation({ status: 'loading' })
+    setStations([])
     navigator.geolocation.getCurrentPosition(
       pos => {
         const { latitude: lat, longitude: lon } = pos.coords
         setLocation({ status: 'ready', lat, lon })
         fetchStations(lat, lon, activeFuel, radius)
       },
-      () => setLocation({ status: 'error', message: 'Localisation refusée.' }),
-      { enableHighAccuracy: true, timeout: 10000 }
+      (err) => {
+        console.error('Geolocation error:', err.code, err.message)
+        let msg = 'Localisation refusée.'
+        if (err.code === 2) msg = 'Position indisponible. Vérifiez le GPS.'
+        if (err.code === 3) msg = 'Délai dépassé. Réessayez.'
+        setLocation({ status: 'error', message: msg })
+      },
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
     )
   }, [activeFuel, radius, fetchStations])
 
