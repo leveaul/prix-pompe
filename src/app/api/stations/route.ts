@@ -59,8 +59,7 @@ export async function GET(req: NextRequest) {
 
     const govUrl = new URL(FUEL_API)
     govUrl.searchParams.set('where', bboxClause + fuelClause)
-    const limit = radius >= 100000 ? 300 : radius >= 50000 ? 200 : 100
-    govUrl.searchParams.set('limit', String(limit))
+    govUrl.searchParams.set('limit', '100')
 
     const govRes = await fetch(govUrl.toString(), { cache: 'no-store' })
     if (!govRes.ok) {
