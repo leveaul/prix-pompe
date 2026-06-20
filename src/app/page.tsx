@@ -33,6 +33,7 @@ export default function Home() {
   const [activeFuel, setActiveFuel] = useState('')
   const [radius, setRadius] = useState('5000')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [radiusPickerOpen, setRadiusPickerOpen] = useState(false)
   const [sortBy, setSortBy] = useState<'distance' | 'price'>('distance')
   const [isMobile, setIsMobile] = useState(false)
   const [winH, setWinH] = useState(700)
@@ -166,12 +167,14 @@ export default function Home() {
           )}
         </div>
         {location.status === 'ready' && (
-          <select value={radius} onChange={e => setRadius(e.target.value)} style={{
+          <button onClick={() => setRadiusPickerOpen(true)} style={{
             background: '#161a24', border: '1px solid #1e2d40', borderRadius: '8px',
-            color: '#94a3b8', fontSize: '12px', padding: '4px 8px', cursor: 'pointer',
+            color: '#94a3b8', fontSize: '12px', padding: '5px 10px', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600,
           }}>
-            {RADIUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+            {RADIUS_OPTIONS.find(o => o.value === radius)?.label}
+            <span style={{ fontSize: '9px' }}>▼</span>
+          </button>
         )}
       </header>
 
@@ -338,6 +341,53 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Radius picker modal */}
+      {radiusPickerOpen && (
+        <div
+          onClick={() => setRadiusPickerOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 300,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#161a24', borderRadius: '16px 16px 0 0',
+              width: '100%', maxWidth: '480px',
+              padding: '8px 0 24px',
+              boxShadow: '0 -8px 32px rgba(0,0,0,0.5)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}>
+              <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#2d3f55' }} />
+            </div>
+            <div style={{ padding: '4px 20px 12px', fontSize: '13px', fontWeight: 700, color: '#94a3b8' }}>
+              Rayon de recherche
+            </div>
+            {RADIUS_OPTIONS.map(o => (
+              <button
+                key={o.value}
+                onClick={() => { setRadius(o.value); setRadiusPickerOpen(false) }}
+                style={{
+                  width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '14px 20px',
+                  background: radius === o.value ? '#1e2436' : 'transparent',
+                  border: 'none', borderTop: '1px solid #1e2d40',
+                  color: radius === o.value ? '#f59e0b' : '#f1f5f9',
+                  fontSize: '15px', fontWeight: radius === o.value ? 700 : 500,
+                  cursor: 'pointer', textAlign: 'left',
+                }}
+              >
+                <span>{o.label}</span>
+                {radius === o.value && <span>✓</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
