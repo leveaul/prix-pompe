@@ -50,10 +50,10 @@ export async function GET(req: NextRequest) {
     const latDelta = radiusKm / 111 // 1° lat ≈ 111km
     const lonDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180))
 
-    const latMin = lat - latDelta, latMax = lat + latDelta
-    const lonMin = lon - lonDelta, lonMax = lon + lonDelta
+    const latMin = (lat - latDelta) * 100000, latMax = (lat + latDelta) * 100000
+    const lonMin = (lon - lonDelta) * 100000, lonMax = (lon + lonDelta) * 100000
 
-    const bboxClause = `latitude>=${latMin} AND latitude<=${latMax} AND longitude>=${lonMin} AND longitude<=${lonMax}`
+    const bboxClause = `int(latitude)>=${Math.round(latMin)} AND int(latitude)<=${Math.round(latMax)} AND int(longitude)>=${Math.round(lonMin)} AND int(longitude)<=${Math.round(lonMax)}`
     const fuelColEntry = fuel ? FUEL_COLS.find(f => f.name === fuel) : null
     const fuelClause = fuelColEntry ? ` AND ${fuelColEntry.col} IS NOT NULL` : ''
 
@@ -77,8 +77,9 @@ export async function GET(req: NextRequest) {
 
     const stations = raw.map(r => {
       const geom = r.geom as { lat?: number; lon?: number } | null
-      const stLat = geom?.lat ?? 0
-      const stLon = geom?.lon ?? 0
+      const rawLat = r.latitude, rawLon = r.longitude
+      const stLat = geom?.lat ?? (rawLat ? parseFloat(String(rawLat)) / 100000 : 0)
+      const stLon = geom?.lon ?? (rawLon ? parseFloat(String(rawLon)) / 100000 : 0)
       const brand = brandMap[String(r.id)] ?? ''
 
       const fuels = FUEL_COLS
