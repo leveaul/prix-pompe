@@ -42,4 +42,7 @@ export const RADIUS_OPTIONS = [
   { value: '5000', label: '5 km' },
   { value: '10000', label: '10 km' },
   { value: '20000', label: '20 km' },
+  { value: '50000', label: '50 km' },
+  { value: '100000', label: '100 km' },
+  { value: '200000', label: '200 km' },
 ]

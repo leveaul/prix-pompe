@@ -98,6 +98,13 @@ export default function Map({ stations, userLat, userLon, selectedId, onSelect, 
       markersRef.current.forEach(m => (m as ReturnType<typeof L.marker>).remove())
       markersRef.current.clear()
 
+      // Ajuste la vue pour englober toutes les stations + la position utilisateur
+      if (stations.length > 0) {
+        const bounds = L.latLngBounds([[userLat, userLon]])
+        stations.forEach(s => bounds.extend([s.lat, s.lon]))
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 })
+      }
+
       // Pre-fetch logos for visible brands
       const brandsNeeded = new Set(stations.map(s => s.brand).filter(Boolean))
       const logoMap: globalThis.Map<string, string> = new globalThis.Map()

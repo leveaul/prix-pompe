@@ -51,7 +51,9 @@ export async function GET(req: NextRequest) {
 
     const govUrl = new URL(FUEL_API)
     govUrl.searchParams.set('where', distanceClause + fuelClause)
-    govUrl.searchParams.set('limit', '100')
+    // Plus le rayon est grand, plus on autorise de résultats (jusqu'à 300)
+    const limit = radius >= 100000 ? 300 : radius >= 50000 ? 200 : 100
+    govUrl.searchParams.set('limit', String(limit))
     govUrl.searchParams.set('order_by', `distance(geom, geom'POINT(${lon} ${lat})')`)
 
     const govRes = await fetch(govUrl.toString(), { cache: 'no-store' })
