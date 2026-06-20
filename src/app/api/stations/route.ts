@@ -23,13 +23,11 @@ function getSupabase() {
 async function fetchBrandsFromSupabase(ids: string[]): Promise<Record<string, string>> {
   const supabase = getSupabase()
   if (!supabase || ids.length === 0) return {}
-
   const { data, error } = await supabase
     .from('station_brands')
     .select('id, brand')
     .in('id', ids)
     .neq('brand', '')
-
   if (error) { console.error('Supabase error:', error); return {} }
   const map: Record<string, string> = {}
   for (const row of data ?? []) map[row.id] = row.brand
@@ -45,21 +43,14 @@ export async function GET(req: NextRequest) {
   if (isNaN(lat) || isNaN(lon)) return NextResponse.json({ error: 'Missing lat/lon' }, { status: 400 })
 
   try {
-    // Bounding box manuelle (plus fiable que distance() au-delà de ~30km sur cette API)
-    const radiusKm = radius / 1000
-    const latDelta = radiusKm / 111 // 1° lat ≈ 111km
-    const lonDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180))
-
-    const latMin = (lat - latDelta) * 100000, latMax = (lat + latDelta) * 100000
-    const lonMin = (lon - lonDelta) * 100000, lonMax = (lon + lonDelta) * 100000
-
-    const bboxClause = `int(latitude)>=${Math.round(latMin)} AND int(latitude)<=${Math.round(latMax)} AND int(longitude)>=${Math.round(lonMin)} AND int(longitude)<=${Math.round(lonMax)}`
+    const distanceClause = `distance(geom, geom'POINT(${lon} ${lat})', ${radius}m)`
     const fuelColEntry = fuel ? FUEL_COLS.find(f => f.name === fuel) : null
     const fuelClause = fuelColEntry ? ` AND ${fuelColEntry.col} IS NOT NULL` : ''
 
     const govUrl = new URL(FUEL_API)
-    govUrl.searchParams.set('where', bboxClause + fuelClause)
-    govUrl.searchParams.set('limit', '100')
+    govUrl.searchParams.set('where', distanceClause + fuelClause)
+    govUrl.searchParams.set('limit', '100') // max autorisé par l'API
+    govUrl.searchParams.set('order_by', `distance(geom, geom'POINT(${lon} ${lat})')`)
 
     const govRes = await fetch(govUrl.toString(), { cache: 'no-store' })
     if (!govRes.ok) {
@@ -70,7 +61,6 @@ export async function GET(req: NextRequest) {
     const govData = await govRes.json()
     const raw: Record<string, unknown>[] = govData.results ?? []
 
-    // Fetch brands from Supabase in one query
     const ids = raw.map(r => String(r.id))
     const brandMap = await fetchBrandsFromSupabase(ids)
 
