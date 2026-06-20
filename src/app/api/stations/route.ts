@@ -45,19 +45,29 @@ export async function GET(req: NextRequest) {
   if (isNaN(lat) || isNaN(lon)) return NextResponse.json({ error: 'Missing lat/lon' }, { status: 400 })
 
   try {
-    const distanceClause = `distance(geom, geom'POINT(${lon} ${lat})', ${radius}m)`
+    // Bounding box manuelle (plus fiable que distance() au-delà de ~30km sur cette API)
+    const radiusKm = radius / 1000
+    const latDelta = radiusKm / 111 // 1° lat ≈ 111km
+    const lonDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180))
+
+    const latMin = lat - latDelta, latMax = lat + latDelta
+    const lonMin = lon - lonDelta, lonMax = lon + lonDelta
+
+    const bboxClause = `latitude>=${latMin} AND latitude<=${latMax} AND longitude>=${lonMin} AND longitude<=${lonMax}`
     const fuelColEntry = fuel ? FUEL_COLS.find(f => f.name === fuel) : null
     const fuelClause = fuelColEntry ? ` AND ${fuelColEntry.col} IS NOT NULL` : ''
 
     const govUrl = new URL(FUEL_API)
-    govUrl.searchParams.set('where', distanceClause + fuelClause)
-    // Plus le rayon est grand, plus on autorise de résultats (jusqu'à 300)
+    govUrl.searchParams.set('where', bboxClause + fuelClause)
     const limit = radius >= 100000 ? 300 : radius >= 50000 ? 200 : 100
     govUrl.searchParams.set('limit', String(limit))
-    govUrl.searchParams.set('order_by', `distance(geom, geom'POINT(${lon} ${lat})')`)
 
     const govRes = await fetch(govUrl.toString(), { cache: 'no-store' })
-    if (!govRes.ok) return NextResponse.json({ error: `Upstream ${govRes.status}` }, { status: 502 })
+    if (!govRes.ok) {
+      const errText = await govRes.text().catch(() => '')
+      console.error('Gov API error:', govRes.status, errText)
+      return NextResponse.json({ error: `Upstream ${govRes.status}`, detail: errText.slice(0, 300) }, { status: 502 })
+    }
     const govData = await govRes.json()
     const raw: Record<string, unknown>[] = govData.results ?? []
 
